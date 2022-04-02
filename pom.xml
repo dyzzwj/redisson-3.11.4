@@ -63,6 +63,7 @@
         <module>redisson-spring-data</module>
         <module>redisson-spring-boot-starter</module>
         <module>redisson-hibernate</module>
+        <module>zwj-redisson</module>
     </modules>
 
     <profiles>

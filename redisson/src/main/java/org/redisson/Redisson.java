@@ -389,6 +389,7 @@ public class Redisson implements RedissonClient {
 
     @Override
     public RLock getLock(String name) {
+        //构建一个Lock对象，并传入了redis连接执行器（其实可以就理解为二次封装连接，里面会持有一个redis 连接），以及锁名称
         return new RedissonLock(connectionManager.getCommandExecutor(), name);
     }
     
