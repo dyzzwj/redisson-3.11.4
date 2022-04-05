@@ -30,6 +30,7 @@ public class RedissonLockEntry implements PubSubEntry<RedissonLockEntry> {
 
     public RedissonLockEntry(RPromise<RedissonLockEntry> promise) {
         super();
+        //创建信号量 同时允许0个
         this.latch = new Semaphore(0);
         this.promise = promise;
     }

@@ -348,7 +348,11 @@ public class RedissonMultiLock implements RLock {
     protected int failedLocksLimit() {
         return 0;
     }
-    
+
+
+    // 参数1 waitTime：向Redis获取锁的超时时间
+    // 参数2 leaseTime：锁的失效时间(从开始获取锁时计时)
+    // 参数3 unit：时间单位
     @Override
     public boolean tryLock(long waitTime, long leaseTime, TimeUnit unit) throws InterruptedException {
 //        try {
@@ -358,6 +362,7 @@ public class RedissonMultiLock implements RLock {
 //        }
         long newLeaseTime = -1;
         if (leaseTime != -1) {
+            //没有设置超时时间
             if (waitTime == -1) {
                 newLeaseTime = unit.toMillis(leaseTime);
             } else {
@@ -371,7 +376,7 @@ public class RedissonMultiLock implements RLock {
             remainTime = unit.toMillis(waitTime);
         }
         long lockWaitTime = calcLockWaitTime(remainTime);
-        
+        // 允许失败的最大实例数(N - (N/2 + 1))
         int failedLocksLimit = failedLocksLimit();
         List<RLock> acquiredLocks = new ArrayList<>(locks.size());
         for (ListIterator<RLock> iterator = locks.listIterator(); iterator.hasNext();) {
@@ -379,21 +384,26 @@ public class RedissonMultiLock implements RLock {
             boolean lockAcquired;
             try {
                 if (waitTime == -1 && leaseTime == -1) {
+                    // 这里的tryLock是RedissonLock中的普通加锁方法(下同)
                     lockAcquired = lock.tryLock();
                 } else {
                     long awaitTime = Math.min(lockWaitTime, remainTime);
+                    // 这里的tryLock是RedissonLock中的普通加锁方法(下同)
                     lockAcquired = lock.tryLock(awaitTime, newLeaseTime, TimeUnit.MILLISECONDS);
                 }
             } catch (RedisResponseTimeoutException e) {
+                // 加锁异常，也需要释放当前锁(防止因为客户端没有及时响应而导致下次无法加锁)
                 unlockInner(Arrays.asList(lock));
                 lockAcquired = false;
             } catch (Exception e) {
                 lockAcquired = false;
             }
-            
+
+            // 加锁成功，将当前锁加入锁集合中
             if (lockAcquired) {
                 acquiredLocks.add(lock);
             } else {
+                // 如果大多数实例都获取到了锁，说明redlock加锁成功
                 if (locks.size() - acquiredLocks.size() == failedLocksLimit()) {
                     break;
                 }
@@ -413,7 +423,7 @@ public class RedissonMultiLock implements RLock {
                     failedLocksLimit--;
                 }
             }
-            
+            // 判断加锁的总时间有没有超过最大等待时间，如果超时了则加锁失败，并释放所有锁
             if (remainTime != -1) {
                 remainTime -= System.currentTimeMillis() - time;
                 time = System.currentTimeMillis();
@@ -423,7 +433,7 @@ public class RedissonMultiLock implements RLock {
                 }
             }
         }
-
+        // 给每个节点设置失效时间
         if (leaseTime != -1) {
             List<RFuture<Boolean>> futures = new ArrayList<>(acquiredLocks.size());
             for (RLock rLock : acquiredLocks) {

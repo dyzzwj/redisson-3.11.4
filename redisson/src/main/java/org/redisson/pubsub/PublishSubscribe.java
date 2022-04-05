@@ -72,6 +72,7 @@ abstract class PublishSubscribe<E extends PubSubEntry<E>> {
 
     public RFuture<E> subscribe(String entryName, String channelName) {
         AtomicReference<Runnable> listenerHolder = new AtomicReference<Runnable>();
+
         AsyncSemaphore semaphore = service.getSemaphore(new ChannelName(channelName));
         RPromise<E> newPromise = new RedissonPromise<E>() {
             @Override
@@ -87,6 +88,7 @@ abstract class PublishSubscribe<E extends PubSubEntry<E>> {
                 E entry = entries.get(entryName);
                 if (entry != null) {
                     entry.aquire();
+                    //唤醒等待的线程
                     semaphore.release();
                     entry.getPromise().onComplete(new TransferListener<E>(newPromise));
                     return;

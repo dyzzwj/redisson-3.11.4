@@ -184,6 +184,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
             return;
         }
 
+        //订阅这把锁
         RFuture<RedissonLockEntry> future = subscribe(threadId);
         commandExecutor.syncSubscription(future);
 
@@ -191,13 +192,16 @@ public class RedissonLock extends RedissonExpirable implements RLock {
             while (true) {
                 ttl = tryAcquire(leaseTime, unit, threadId);
                 // lock acquired
+                //获取锁成功
                 if (ttl == null) {
                     break;
                 }
 
                 // waiting for message
+                //锁的过期时间为ttl
                 if (ttl >= 0) {
                     try {
+                        //Semaphore.tryAcquire() 信号量为0
                         getEntry(threadId).getLatch().tryAcquire(ttl, TimeUnit.MILLISECONDS);
                     } catch (InterruptedException e) {
                         if (interruptibly) {
@@ -218,7 +222,14 @@ public class RedissonLock extends RedissonExpirable implements RLock {
         }
 //        get(lockAsync(leaseTime, unit));
     }
-    
+
+    /**
+     * 返回Null代表加锁成功 返回Long代表锁的过期时间
+     * @param leaseTime
+     * @param unit
+     * @param threadId
+     * @return
+     */
     private Long tryAcquire(long leaseTime, TimeUnit unit, long threadId) {
         return get(tryAcquireAsync(leaseTime, unit, threadId));
     }
@@ -246,9 +257,10 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     // 参数3：线程id
     private <T> RFuture<Long> tryAcquireAsync(long leaseTime, TimeUnit unit, long threadId) {
         if (leaseTime != -1) {
-            //
+            //设置了锁的超时时间
             return tryLockInnerAsync(leaseTime, unit, threadId, RedisCommands.EVAL_LONG);
         }
+        //没有设置锁的超时时间
         RFuture<Long> ttlRemainingFuture = tryLockInnerAsync(commandExecutor.getConnectionManager().getCfg().getLockWatchdogTimeout(), TimeUnit.MILLISECONDS, threadId, RedisCommands.EVAL_LONG);
         ttlRemainingFuture.onComplete((ttlRemaining, e) -> {
             if (e != null) {
@@ -256,7 +268,9 @@ public class RedissonLock extends RedissonExpirable implements RLock {
             }
 
             // lock acquired
+            //获取锁成功
             if (ttlRemaining == null) {
+                //续期
                 scheduleExpirationRenewal(threadId);
             }
         });
@@ -281,6 +295,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                 if (ent == null) {
                     return;
                 }
+                //取第一个线程
                 Long threadId = ent.getFirstThreadId();
                 if (threadId == null) {
                     return;
@@ -292,7 +307,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                         log.error("Can't update lock " + getName() + " expiration", e);
                         return;
                     }
-                    
+                    //获取锁成功
                     if (res) {
                         // reschedule itself
                         renewExpiration();
@@ -306,10 +321,12 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     
     private void scheduleExpirationRenewal(long threadId) {
         ExpirationEntry entry = new ExpirationEntry();
+        //当前分布式锁存在watchdog
         ExpirationEntry oldEntry = EXPIRATION_RENEWAL_MAP.putIfAbsent(getEntryName(), entry);
         if (oldEntry != null) {
             oldEntry.addThreadId(threadId);
         } else {
+            //当前分布式锁还没有watchdog
             entry.addThreadId(threadId);
             renewExpiration();
         }
@@ -317,6 +334,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
 
     protected RFuture<Boolean> renewExpirationAsync(long threadId) {
         return commandExecutor.evalWriteAsync(getName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
+                //如果锁存在 就续约并返回1 否则返回0
                 "if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then " +
                     "redis.call('pexpire', KEYS[1], ARGV[1]); " +
                     "return 1; " +
@@ -357,7 +375,8 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                  *    ARGV[2]：getLockName(threadId)，就是是获取锁时设置的唯一值 value，即UUID+threadId。
                  */
 
-                // 如果key不存在，则执行hset命令,然后通过pexpire命令设置锁的过期时间
+                // 如果key不存在，则执行hset命令,hset 是对于redis map数据结构 其实就是针对key map 中的某个数据 设置为1
+                // 然后通过pexpire命令设置锁的过期时间
                 // 返回空值nil，表示获取锁成功
                   "if (redis.call('exists', KEYS[1]) == 0) then " +
                       "redis.call('hset', KEYS[1], ARGV[2], 1); " +
@@ -600,14 +619,24 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     }
 
     protected RFuture<Boolean> unlockInnerAsync(long threadId) {
+        //执行lua脚本实现解锁
         return commandExecutor.evalWriteAsync(getName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
+                // KEYS[1]、KEYS[2]：getName(), getChannelName()分别是锁的key和channel名称
+                // ARGV[1]：LockPubSub.UNLOCK_MESSAGE表示解锁事件的消息，用于消息发布
+                // ARGV[2]：internalLockLeaseTime锁的失效时间，用于重入锁的失效时间更新
+                // ARGV[3]：当前线程获取分布式锁对应的key 即hash里面的key UUID+threadId
+
+                // 如果key不存在或但value不匹配，解锁失败
                 "if (redis.call('hexists', KEYS[1], ARGV[3]) == 0) then " +
                     "return nil;" +
                 "end; " +
+                 //锁的重入次数减1
                 "local counter = redis.call('hincrby', KEYS[1], ARGV[3], -1); " +
+                 // 如果重入次数还大于0，说明该线程依然持有锁，更新失效时间
                 "if (counter > 0) then " +
                     "redis.call('pexpire', KEYS[1], ARGV[2]); " +
                     "return 0; " +
+                // 删除key以释放锁，并发布解锁的消息，通知其它线程来竞争锁
                 "else " +
                     "redis.call('del', KEYS[1]); " +
                     "redis.call('publish', KEYS[2], ARGV[1]); " +
@@ -621,6 +650,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     @Override
     public RFuture<Void> unlockAsync(long threadId) {
         RPromise<Void> result = new RedissonPromise<Void>();
+        //释放锁
         RFuture<Boolean> future = unlockInnerAsync(threadId);
 
         future.onComplete((opStatus, e) -> {

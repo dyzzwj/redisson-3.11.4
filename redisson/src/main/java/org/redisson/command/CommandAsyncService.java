@@ -339,6 +339,7 @@ public class CommandAsyncService implements CommandAsyncExecutor {
     }
 
     private NodeSource getNodeSource(String key) {
+        //计算slot
         int slot = connectionManager.calcSlot(key);
         MasterSlaveEntry entry = connectionManager.getEntry(slot);
         return new NodeSource(entry, slot);
@@ -403,7 +404,13 @@ public class CommandAsyncService implements CommandAsyncExecutor {
 
     @Override
     public <T, R> RFuture<R> evalWriteAsync(String key, Codec codec, RedisCommand<T> evalCommandType, String script, List<Object> keys, Object... params) {
+        //根据key 去获取nodeSource 节点，为什么？
+        //因为如果我们是 3个M  3S，我们要知道key放在哪个Node上面 对吧
         NodeSource source = getNodeSource(key);
+        //这里keys 是上面的数组，里面就一个元素 就是你指定的锁名称 KEY[1] 所以就代表指定的锁
+        //params 里放的是什么数据？internalLockLeaseTime, getLockName(threadId))，就是对应
+        //AGVS[1] AGVS[2] 一个是LockLeaseTime watchDog 的时长  getLockName(threadId)) = UUID + ":" + ThreadId 其实就是客户端上的一个线程的唯一标识
+
         return evalAsync(source, false, codec, evalCommandType, script, keys, params);
     }
 
