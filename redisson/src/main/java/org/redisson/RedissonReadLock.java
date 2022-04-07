@@ -58,16 +58,33 @@ public class RedissonReadLock extends RedissonLock implements RLock {
         internalLockLeaseTime = unit.toMillis(leaseTime);
 
         return commandExecutor.evalWriteAsync(getName(), LongCodec.INSTANCE, command,
-                                "local mode = redis.call('hget', KEYS[1], 'mode'); " +
+                /**
+                 * KEYS[1]：锁名字 anyRWLock hash结构
+                 * KEYS[2]：锁超时 key 每次加锁，会额外维护一个 key 表示这次锁的超时时间，这个 key 的结构是 {锁名字}:UUID:ThreadId:rwlock_timeout:重入次数
+                 * {锁名字}:UUID:ThreadId:rwlock_timeout 组成的字符串，{anyRWLock}:e70b1307-9ddd-43de-ac9d-9c42b5c99a0d:1:rwlock_timeout
+                 * ARGV[1]：锁时间，默认 30s
+                 * ARGV[2]：当前线程，UUID:ThreadId 组成的字符串，e70b1307-9ddd-43de-ac9d-9c42b5c99a0d:1
+                 * ARGV[3]：写锁名字，getWriteLockName(threadId) 写锁名字，UUID:ThreadId:write 组成的字符串， e70b1307-9ddd-43de-ac9d-9c42b5c99a0d:1:write
+                 */
+                        //获取锁anyRWLock的mode字段的值
+                "local mode = redis.call('hget', KEYS[1], 'mode'); " +
+                                 //锁不存在
                                 "if (mode == false) then " +
+                                 //将hash表anyRWLock的mode字段的值设置为read
                                   "redis.call('hset', KEYS[1], 'mode', 'read'); " +
+                                 //将hash表anyRWLock的e70b1307-9ddd-43de-ac9d-9c42b5c99a0d:1字段的值设置为1
                                   "redis.call('hset', KEYS[1], ARGV[2], 1); " +
+                                 //将{anyRWLock}:e70b1307-9ddd-43de-ac9d-9c42b5c99a0d:1:rwlock_timeout:1 的值设置为1
                                   "redis.call('set', KEYS[2] .. ':1', 1); " +
+                                 //设置过期时间
                                   "redis.call('pexpire', KEYS[2] .. ':1', ARGV[1]); " +
                                   "redis.call('pexpire', KEYS[1], ARGV[1]); " +
                                   "return nil; " +
                                 "end; " +
+                                 //锁是读锁 或者 （写锁且 {anyRWLock}的e70b1307-9ddd-43de-ac9d-9c42b5c99a0d:1:write字段  存在）
                                 "if (mode == 'read') or (mode == 'write' and redis.call('hexists', KEYS[1], ARGV[3]) == 1) then " +
+                                 //对anyRWLock的e70b1307-9ddd-43de-ac9d-9c42b5c99a0d:1（线程id）字段值 自增加1
+                                 //返回的是当前重入次数
                                   "local ind = redis.call('hincrby', KEYS[1], ARGV[2], 1); " + 
                                   "local key = KEYS[2] .. ':' .. ind;" +
                                   "redis.call('set', key, 1); " +
