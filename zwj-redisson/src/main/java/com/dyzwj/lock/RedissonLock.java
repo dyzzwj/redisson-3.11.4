@@ -21,6 +21,10 @@ public class RedissonLock {
         RedissonClient redisson = Redisson.create(config);
         //这里是重点 获取锁，这也是重点分析的地方
         RLock lock = redisson.getLock("lock");
+
+        //公平锁
+        RLock fairLock = redisson.getFairLock("lock");
+        fairLock.lock();
         //加锁
         lock.lock();
 
