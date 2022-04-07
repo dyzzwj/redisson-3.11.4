@@ -124,6 +124,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
         //调用父类的构造方法 里面没有重要的操作，加入了一个序列化codec，设置了一下树形
         super(commandExecutor, name);
         this.commandExecutor = commandExecutor;
+        //随机uuid
         this.id = commandExecutor.getConnectionManager().getId();
         //看门狗watchdog 的租约时间，这个比较重要，因为设计到lock 的续约 与 故障的自动释放锁
         //这里面有一个比较好的设计思想
@@ -180,6 +181,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
         //
         Long ttl = tryAcquire(leaseTime, unit, threadId);
         // lock acquired
+        //加锁成功
         if (ttl == null) {
             return;
         }
@@ -367,12 +369,9 @@ public class RedissonLock extends RedissonExpirable implements RLock {
         //通过EVAL命令执行Lua脚本获取锁，保证了原子性
         return commandExecutor.evalWriteAsync(getName(), LongCodec.INSTANCE, command,
                 /**
-                 *  hash结构
-                 *
-                 *
                  *    KEYS[1]：Collections.<Object>singletonList(getName())就是该分布式锁的key，也就是初始化锁时设置的名字。
                  *    ARGV[1]：internalLockLeaseTime，就是锁的有效时间；
-                 *    ARGV[2]：getLockName(threadId)，就是是获取锁时设置的唯一值 value，即UUID+threadId。
+                 *    ARGV[2]：getLockName(threadId)，就是hash结构里的key，即UUID+threadId。 (注意 UUID是随机的)
                  */
 
                 // 如果key不存在，则执行hset命令,hset 是对于redis map数据结构 其实就是针对key map 中的某个数据 设置为1
@@ -621,7 +620,8 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     protected RFuture<Boolean> unlockInnerAsync(long threadId) {
         //执行lua脚本实现解锁
         return commandExecutor.evalWriteAsync(getName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
-                // KEYS[1]、KEYS[2]：getName(), getChannelName()分别是锁的key和channel名称
+                // KEYS[1]：是锁的key
+                // KEYS[2]：redisson_lock__channel"+":{" + KEYS[1] + "}" || "redisson_lock__channel"+":" + KEYS[1]
                 // ARGV[1]：LockPubSub.UNLOCK_MESSAGE表示解锁事件的消息，用于消息发布
                 // ARGV[2]：internalLockLeaseTime锁的失效时间，用于重入锁的失效时间更新
                 // ARGV[3]：当前线程获取分布式锁对应的key 即hash里面的key UUID+threadId
