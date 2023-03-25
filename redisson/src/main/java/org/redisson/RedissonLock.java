@@ -177,7 +177,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
 
     /**
      * 阻塞的获取锁
-     * @param leaseTime  加锁以后leaseTime秒钟自动解锁
+     * @param leaseTime  加锁以后leaseTime秒钟自动解锁  -1表示不会自动解锁 需要收到解锁
      * @param unit
      * @param interruptibly
      * @throws InterruptedException
@@ -191,7 +191,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
          * 返回Null代表获取锁成功 非null代表获取锁失败 值代表其他线程持有锁的剩余失效时间
          */
         Long ttl = tryAcquire(leaseTime, unit, threadId);
-        // lock acquired// 如果返回的失效时间为空，表示锁获取成功(后面看tryAcquire可以知道)
+        // 如果返回的失效时间为空，表示锁获取成功(后面看tryAcquire可以知道)
         if (ttl == null) {
             return;
         }
@@ -394,6 +394,12 @@ public class RedissonLock extends RedissonExpirable implements RLock {
         internalLockLeaseTime = unit.toMillis(leaseTime);
 
         //通过EVAL命令执行Lua脚本获取锁，保证了原子性
+        /**
+         *  锁：hash结构
+         *  key - 资源名称 （多个线程竞争这个资源）
+         *  filed - 线程标识 threadid + uuid
+         *  value - 冲入次数
+         */
         return commandExecutor.evalWriteAsync(getName(), LongCodec.INSTANCE, command,
                 /**
                  *    KEYS[1]：Collections.<Object>singletonList(getName())就是该分布式锁的key，也就是初始化锁时设置的名字。
@@ -661,9 +667,9 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                 // KEYS[2]：redisson_lock__channel"+":{" + KEYS[1] + "}" || "redisson_lock__channel"+":" + KEYS[1]
                 // ARGV[1]：LockPubSub.UNLOCK_MESSAGE表示解锁事件的消息，用于消息发布
                 // ARGV[2]：internalLockLeaseTime锁的失效时间，用于重入锁的失效时间更新
-                // ARGV[3]：当前线程获取分布式锁对应的key 即hash里面的key UUID+threadId
+                // ARGV[3]：当前线程获取分布式锁对应的key 即hash里面的field UUID+threadId
 
-                // 如果key不存在或但value不匹配，解锁失败
+                // 如果key不存在或value不匹配，解锁失败
                 "if (redis.call('hexists', KEYS[1], ARGV[3]) == 0) then " +
                     "return nil;" +
                 "end; " +
