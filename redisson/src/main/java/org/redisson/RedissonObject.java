@@ -56,7 +56,7 @@ public abstract class RedissonObject implements RObject {
     protected final CommandAsyncExecutor commandExecutor;
 
     /**
-     * redis所的key 是一个Hash结构
+     * redis锁的key 是一个Hash结构
      */
     protected String name;
     protected final Codec codec;
