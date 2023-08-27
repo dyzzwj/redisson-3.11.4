@@ -197,7 +197,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
         }
 
         //加锁失败
-        // 使用redis->subscribe订阅channel，用于监听回调处理
+        // 使用redis->subscribe订阅channel，用于监听回调处理  释放锁时会发布事件 通知等待锁的线程
         RFuture<RedissonLockEntry> future = subscribe(threadId);
         commandExecutor.syncSubscription(future);
 
@@ -404,7 +404,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                  *    如果key不存在，则执行hset命令,hset 是对于redis map数据结构 其实就是针对key map 中的某个数据 设置为1
                  *    然后通过pexpire命令设置锁的过期时间 返回空值nil，表示获取锁成功
                  *    "lockName":{
-                 * 	           //客户端ID:重入次数加了1
+                 * 	           //uuid(客户端 id) + threadID:重入次数加了1
                  * 	           "11bb52bc-a764-4649-8b46-a61513d7fe44:1":2
                  *       }
                  */
@@ -413,7 +413,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                       "redis.call('pexpire', KEYS[1], ARGV[1]); " +
                       "return nil; " +
                   "end; " +
-                   // 如果key已经存在，则判断value是否相同，如果相同，则锁的重入次数加1，并重新设置过期时间 返回空值nil，表示获取锁成功
+                   // 如果key已经存在，则判断filed是否相同，如果相同，则锁的重入次数加1，并重新设置过期时间 返回空值nil，表示获取锁成功
                   /**
                    *  "lockName":{
                    * 	     //客户端ID:重入次数加了1
@@ -663,7 +663,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                 // ARGV[2]：internalLockLeaseTime锁的失效时间，用于重入锁的失效时间更新
                 // ARGV[3]：当前线程获取分布式锁对应的key 即hash里面的key UUID+threadId
 
-                // 如果key不存在或但value不匹配，解锁失败
+                // 如果key不存在或field不存在，解锁失败
                 "if (redis.call('hexists', KEYS[1], ARGV[3]) == 0) then " +
                     "return nil;" +
                 "end; " +

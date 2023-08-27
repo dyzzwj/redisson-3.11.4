@@ -19,13 +19,13 @@ public class RedissonLock {
         //因为Redisson 是基于redis封装的一套便于复杂操作的框架
         //所以这里构建对象肯定是创建一些与redis的连接
         RedissonClient redisson = Redisson.create(config);
-        //这里是重点 获取锁，这也是重点分析的地方
+        // 获取锁
         RLock lock = redisson.getLock("lock");
 
         //公平锁
         RLock fairLock = redisson.getFairLock("lock");
         fairLock.lock();
-        //加锁
+        //加锁 这里是重点 这也是重点分析的地方
         lock.lock();
 
         // 加锁以后10秒钟自动解锁
